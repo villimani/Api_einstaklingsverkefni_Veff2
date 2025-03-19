@@ -2,8 +2,11 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { createCategory, getCategories, getCategory, validateCategory, updateCategory, deleteCategory } from './categories.db.js';
 import { createQuestion, getQuestions, getQuestionById, getQuestionsByCategory, validateQuestionToCreate, validateQuestionToUpdate, updateQuestion, deleteQuestion } from './questions.db.js';
+import { cors } from 'hono/cors';
 
 const app = new Hono();
+
+app.use('*', cors());
 
 // ==================================================
 // Category Endpoints
@@ -29,7 +32,7 @@ app.get('/', (c) => {
  */
 app.get('/categories', async (c) => {
   try {
-    
+
     const limit = parseInt(c.req.query('limit') || '10', 10);
     const page = parseInt(c.req.query('page') || '1', 10);
 
