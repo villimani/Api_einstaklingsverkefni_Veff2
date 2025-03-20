@@ -149,13 +149,13 @@ app.delete('/categories/:slug', async (c) => {
     const deletedCategory = await deleteCategory(slug);
 
     if (!deletedCategory) {
-      return c.json({ message: 'Category not found' }, 404);
+      return c.json({ success: false, message: 'Category not found' }, 404);
     }
 
-    return c.json(null, 204);
+    return c.json({ success: true }, 200); // Return success: true on successful deletion
   } catch (error) {
     console.error('Error deleting category:', error);
-    return c.json({ error: 'Internal Server Error' }, 500);
+    return c.json({ success: false, error: 'Internal Server Error' }, 500);
   }
 });
 
