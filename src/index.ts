@@ -32,21 +32,24 @@ app.get('/', (c) => {
  */
 app.get('/categories', async (c) => {
   try {
+    // Sækja pagination parametra úr query
+    const limit = parseInt(c.req.query('limit') || '10', 10); // Sjálfgefið limit er 10
+    const page = parseInt(c.req.query('page') || '1', 10); // Sjálfgefið page er 1
 
-    const limit = parseInt(c.req.query('limit') || '10', 10);
-    const page = parseInt(c.req.query('page') || '1', 10);
+    // Sækja flokkana með pagination
+    const { categories, total } = await getCategories(limit, page);
 
-    const { categories, total, page: currentPage, limit: currentLimit } = await getCategories(limit, page);
-
+    // Reikna heildarfjölda síðna
     const totalPages = Math.ceil(total / limit);
 
+    // Skila paginated niðurstöðum
     return c.json({
-      data: categories,
+      data: categories, // Array af flokkum
       pagination: {
-        page: currentPage,
-        limit: currentLimit,
-        total,
-        totalPages,
+        page, // Núverandi síða
+        limit, // Fjöldi flokka á síðu
+        total, // Heildarfjöldi flokka
+        totalPages, // Heildarfjöldi síðna
       },
     });
   } catch (error) {
