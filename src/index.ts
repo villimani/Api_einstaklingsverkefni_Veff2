@@ -279,10 +279,10 @@ app.delete('/questions/:id', async (c) => {
 
   try {
     await deleteQuestion(id);
-    return c.json(null, 204);
+    return c.json({ success: true }, 200); // Return a JSON object with `success: true`
   } catch (error) {
     console.error('Error deleting question:', error);
-    return c.json({ error: 'Internal Server Error' }, 500);
+    return c.json({ success: false, error: 'Internal Server Error' }, 500); // Return `success: false` on error
   }
 });
 
