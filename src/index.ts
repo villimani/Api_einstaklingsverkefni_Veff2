@@ -401,7 +401,7 @@ app.post('/users', async (c) => {
   }
 });
 
-app.post('/users/login', async (c) => {
+app.post('/auth/login', async (c) => {
   let credentials;
   try {
     credentials = await c.req.json();
