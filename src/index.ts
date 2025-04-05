@@ -1,298 +1,428 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
-import { createCategory, getCategories, getCategory, validateCategory, updateCategory, deleteCategory } from './categories.db.js';
-import { createQuestion, getQuestions, getQuestionById, getQuestionsByCategory, validateQuestionToCreate, validateQuestionToUpdate, updateQuestion, deleteQuestion } from './questions.db.js';
 import { cors } from 'hono/cors';
+import type { Context, Next } from 'hono';
+import { signToken, verifyToken } from './auth/jwt.js';
 
-const app = new Hono();
+import {
+  createNotepad,
+  getNotepads,
+  getNotepad,
+  validateNotepadCreation,
+  validateNotepadUpdate,
+  updateNotepad,
+  deleteNotepad,
+  getPublicNotepads,
+  userOwnsNotepad
+} from './Database/notepad.db.js';
+
+import {
+  createNote,
+  getNotesByNotepad,
+  getNoteById,
+  validateNoteCreation,
+  validateNoteUpdate,
+  updateNote,
+  deleteNote,
+  noteBelongsToNotepad
+} from './Database/notes.db.js';
+
+import {
+  createUser,
+  getUserById,
+  validateUserCreation,
+  validateUserUpdate,
+  updateUser,
+  deleteUser,
+  verifyCredentials,
+  isUsernameAvailable,
+  isEmailAvailable
+} from './Database/user.db.js';
+
+type Bindings = {
+  userId: string;
+};
+
+const app = new Hono<{ Variables: Bindings }>();
+const SECRET = 'my-secret-key';
+
 
 app.use('*', cors());
 
+const authMiddleware = async (c: Context, next: Next) => {
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const payload = verifyToken(token, SECRET);
+    c.set('userId', payload.userId); // Set the user ID for later use
+    await next(); // Proceed to the next middleware or handler
+  } catch (e) {
+    return c.json({ error: 'Invalid or expired token' }, 401);
+  }
+};
+
 // ==================================================
-// Category Endpoints
+// Homepage
 // ==================================================
 
-/**
- * Homepage with navigation links.
- * Returns a JSON response with links to view categories and create a new category.
- */
 app.get('/', (c) => {
   return c.json({
-    message: 'Welcome to the Quiz App API',
-    links: {
-      viewCategories: '/categories',
-      createCategory: '/categories',
+    message: 'Welcome to the Notepad API',
+    endpoints: {
+      notepads: '/notepads',
+      users: '/users',
+      auth: '/auth/login'
     },
   });
 });
 
-/**
- * View all categories with pagination.
- * Returns a JSON response with categories and pagination details.
- */
-app.get('/categories', async (c) => {
+// ==================================================
+// Notepad Endpoints (Updated)
+// ==================================================
+
+
+// POST route for creating a new notepad
+app.post('/notepads', authMiddleware, async (c) => {
+  let notepadData;
+  
   try {
-    // Sækja pagination parametra úr query
-    const limit = parseInt(c.req.query('limit') || '10', 10); // Sjálfgefið limit er 10
-    const page = parseInt(c.req.query('page') || '1', 10); // Sjálfgefið page er 1
+    notepadData = await c.req.json(); // Parse the incoming JSON body
+  } catch {
+    return c.json({ error: 'Invalid JSON' }, 400); // Handle invalid JSON
+  }
 
-    // Sækja flokkana með pagination
-    const { categories, total } = await getCategories(limit, page);
+  // Validate the incoming data using Zod
+  const validationResult = validateNotepadCreation(notepadData);
+  if (!validationResult.success) {
+    return c.json({ error: validationResult.error.errors }, 400); // Return validation errors if any
+  }
 
-    // Reikna heildarfjölda síðna
-    const totalPages = Math.ceil(total / limit);
+  // Extract valid data
+  const { title, description, isPublic, ownerId } = validationResult.data;
 
-    // Skila paginated niðurstöðum
-    return c.json({
-      data: categories, // Array af flokkum
-      pagination: {
-        page, // Núverandi síða
-        limit, // Fjöldi flokka á síðu
-        total, // Heildarfjöldi flokka
-        totalPages, // Heildarfjöldi síðna
-      },
+  try {
+    // Create the notepad and return the result
+    const newNotepad = await createNotepad({
+      title,
+      description,
+      isPublic: isPublic || false, // Default to false if not provided
+      ownerId,
     });
+
+    return c.json(newNotepad, 201); // Return the created notepad with status code 201
   } catch (error) {
-    console.error('Error fetching categories:', error);
+    console.error('Error creating notepad:', error);
     return c.json({ error: 'Internal Server Error' }, 500);
   }
 });
 
-/**
- * View a single category by slug.
- * Returns a JSON response with the category details.
- */
-app.get('/categories/:slug', async (c) => {
-  const slug = c.req.param('slug');
+// DELETE route for deleting a notepad by ID
+app.delete('/notepads/:id', authMiddleware, async (c) => {
+  const notepadId = Number(c.req.param('id')); // Get the notepad ID from the URL parameters
+
+  if (isNaN(notepadId)) {
+    return c.json({ error: 'Invalid notepad ID' }, 400); // If the ID is invalid, return an error
+  }
+
+  const userId = Number(c.get('userId'));// Assuming user ID is attached to the request via authMiddleware
+
+  // Check if the user owns the notepad
+  const ownsNotepad = await userOwnsNotepad(notepadId, userId);
+  if (!ownsNotepad) {
+    return c.json({ error: 'You do not have permission to delete this notepad' }, 403); // Return an error if the user does not own the notepad
+  }
 
   try {
-    const category = await getCategory(slug);
+    // Delete the notepad and return the result
+    const deletedNotepad = await deleteNotepad(notepadId);
 
-    if (!category) {
-      return c.json({ message: 'Category not found' }, 404);
+    if (!deletedNotepad) {
+      return c.json({ error: 'Notepad not found' }, 404); // If the notepad doesn't exist, return a 404 error
     }
 
-    return c.json(category);
+    return c.json({ message: 'Notepad deleted successfully' }, 200); // Return success message
   } catch (error) {
-    console.error('Error fetching category:', error);
+    console.error('Error deleting notepad:', error);
+    return c.json({ error: 'Internal Server Error' }, 500); // Handle server errors
+  }
+});
+
+app.get('/user/notepads', authMiddleware, async (c) => {
+  try {
+    const userId = Number(c.get('userId'));
+    const limit = parseInt(c.req.query('limit') || '10', 10);
+    const page = parseInt(c.req.query('page') || '1', 10);
+
+    const { notepads, total } = await getNotepads(limit, page, userId);
+    const totalPages = Math.ceil(total / limit);
+
+    return c.json({
+      data: notepads,
+      pagination: { page, limit, total, totalPages },
+    });
+  } catch (error) {
+    console.error('Error fetching user notepads:', error);
     return c.json({ error: 'Internal Server Error' }, 500);
   }
 });
 
-/**
- * Create a new category.
- * Accepts JSON data with a `title` field and creates a new category in the database.
- */
-app.post('/categories', async (c) => {
-  let categoryToCreate: unknown;
+app.get('/public/notepads', async (c) => {
+  try {
+    const limit = parseInt(c.req.query('limit') || '10', 10);
+    const page = parseInt(c.req.query('page') || '1', 10);
+
+    const { notepads, total } = await getPublicNotepads(limit, page);
+    const totalPages = Math.ceil(total / limit);
+
+    return c.json({
+      data: notepads,
+      pagination: { page, limit, total, totalPages },
+    });
+  } catch (error) {
+    console.error('Error fetching public notepads:', error);
+    return c.json({ error: 'Internal Server Error' }, 500);
+  }
+});
+
+app.get('/notepads/:id', authMiddleware, async (c) => {
+  const id = parseInt(c.req.param('id'));
+  try {
+    const userId = Number(c.get('userId'));
+    const notepad = await getNotepad(id);
+    if (!notepad) return c.json({ message: 'Notepad not found' }, 404);
+    if (!notepad.isPublic && notepad.ownerId !== userId) {
+      return c.json({ message: 'Unauthorized - Notepad is private' }, 403);
+    }
+    const { notes } = await getNotesByNotepad(notepad.id, 1000, 1);
+    return c.json({ ...notepad, notes });
+  } catch (error) {
+    console.error('Error fetching notepad with notes:', error);
+    return c.json({ error: 'Internal Server Error' }, 500);
+  }
+});
+
+// PUT route for updating a notepad by ID
+app.put('/notepads/:id', authMiddleware, async (c) => {
+  const notepadId = Number(c.req.param('id')); // Get the notepad ID from the URL parameters
+  const updateData = await c.req.json(); // Get the updated notepad data from the request body
+
+  if (isNaN(notepadId)) {
+    return c.json({ error: 'Invalid notepad ID' }, 400); // If the ID is invalid, return an error
+  }
+
+  const userId = Number(c.get('userId')); // Assuming user ID is attached to the request via authMiddleware
+
+  // Check if the user owns the notepad
+  const ownsNotepad = await userOwnsNotepad(notepadId, userId);
+  if (!ownsNotepad) {
+    return c.json({ error: 'You do not have permission to update this notepad' }, 403); // Return an error if the user does not own the notepad
+  }
+
+  // Validate the update data using the Zod schema
+  const validationResult = validateNotepadUpdate(updateData);
+  if (!validationResult.success) {
+    return c.json({ error: validationResult.error.errors }, 400); // Return validation errors
+  }
 
   try {
-    categoryToCreate = await c.req.json();
-  } catch (e) {
+    // Update the notepad and return the result
+    const updatedNotepad = await updateNotepad(notepadId, updateData);
+
+    if (!updatedNotepad) {
+      return c.json({ error: 'Notepad not found' }, 404); // If the notepad doesn't exist, return a 404 error
+    }
+
+    return c.json(updatedNotepad, 200); // Return the updated notepad
+  } catch (error) {
+    console.error('Error updating notepad:', error);
+    return c.json({ error: 'Internal Server Error' }, 500); // Handle server errors
+  }
+});
+
+// ==================================================
+// Note Endpoints
+// ==================================================
+
+app.get('/notepads/:notepadId/notes', authMiddleware, async (c) => {
+  const notepadId = parseInt(c.req.param('notepadId'));
+  const limit = parseInt(c.req.query('limit') || '10', 10);
+  const page = parseInt(c.req.query('page') || '1', 10);
+
+  try {
+    const { notes, total } = await getNotesByNotepad(notepadId, limit, page);
+    const totalPages = Math.ceil(total / limit);
+    return c.json({ data: notes, pagination: { page, limit, total, totalPages } });
+  } catch (error) {
+    console.error('Error fetching notes:', error);
+    return c.json({ error: 'Internal Server Error' }, 500);
+  }
+});
+
+app.get('/notes/:id', authMiddleware, async (c) => {
+  const id = parseInt(c.req.param('id'));
+  try {
+    const note = await getNoteById(id);
+    if (!note) return c.json({ message: 'Note not found' }, 404);
+    return c.json(note);
+  } catch (error) {
+    console.error('Error fetching note:', error);
+    return c.json({ error: 'Internal Server Error' }, 500);
+  }
+});
+
+app.post('/notepads/:notepadId/notes', authMiddleware, async (c) => {
+  const notepadId = Number(c.req.param('notepadId')); // Get notepadId from the URL
+  let noteData;
+
+  try {
+    noteData = await c.req.json();
+  } catch {
     return c.json({ error: 'Invalid JSON' }, 400);
   }
 
-  const validCategory = validateCategory(categoryToCreate);
-
-  if (!validCategory.success) {
-    return c.json({ error: 'Invalid data', errors: validCategory.error.flatten() }, 400);
+  // Add the notepadId to the data
+  const validNote = validateNoteCreation({ ...noteData, notepadId });
+  if (!validNote.success) {
+    return c.json({ error: 'Invalid data', errors: validNote.error.flatten() }, 400);
   }
 
   try {
-    const createdCategory = await createCategory(validCategory.data);
-    return c.json(createdCategory, 201);
+    // Create the note with the validated data
+    const createdNote = await createNote(validNote.data);
+    return c.json(createdNote, 201);
   } catch (error) {
-    console.error('Error creating category:', error);
+    console.error('Error creating note:', error);
     return c.json({ error: 'Internal Server Error' }, 500);
   }
 });
 
-/**
- * Update a category by slug.
- * Accepts JSON data with a `title` field and updates the category with the specified slug.
- */
-app.patch('/categories/:slug', async (c) => {
-  const slug = c.req.param('slug');
-  let updateData: unknown;
+app.get('/notepads/:notepadId/notes', authMiddleware, async (c) => {
+  const notepadId = Number(c.req.param('notepadId')); // Extract notepadId from URL params
+
+  // Validate notepadId
+  if (isNaN(notepadId)) {
+    return c.json({ error: 'Invalid notepad ID' }, 400);
+  }
+
+  try {
+    // Set default pagination values
+    const limit = 10; // Default limit per page
+    const page = 1; // Default page number
+
+    // Get notes for the specific notepad with pagination
+    const { notes, total, page: pageNumber, limit: pageLimit } = await getNotesByNotepad(notepadId, limit, page);
+
+    // Calculate total pages based on total notes and limit
+    const totalPages = Math.ceil(total / pageLimit);
+
+    return c.json({
+      data: notes,
+      pagination: { page: pageNumber, limit: pageLimit, total, totalPages },
+    });
+  } catch (error) {
+    console.error('Error fetching notes:', error);
+    return c.json({ error: 'Internal Server Error' }, 500);
+  }
+});
+
+
+
+app.patch('/notes/:id', authMiddleware, async (c) => {
+  const id = parseInt(c.req.param('id'));
+  let updateData;
 
   try {
     updateData = await c.req.json();
-  } catch (e) {
+  } catch {
     return c.json({ error: 'Invalid JSON' }, 400);
   }
 
-  const validCategory = validateCategory(updateData);
-
-  if (!validCategory.success) {
-    return c.json({ error: 'Invalid data', errors: validCategory.error.flatten() }, 400);
+  const validNote = validateNoteUpdate(updateData);
+  if (!validNote.success) {
+    return c.json({ error: 'Invalid data', errors: validNote.error.flatten() }, 400);
   }
 
   try {
-    const updatedCategory = await updateCategory(slug, validCategory.data);
-
-    if (!updatedCategory) {
-      return c.json({ message: 'Category not found' }, 404);
-    }
-
-    return c.json(updatedCategory);
+    const updatedNote = await updateNote(id, validNote.data);
+    if (!updatedNote) return c.json({ message: 'Note not found' }, 404);
+    return c.json(updatedNote);
   } catch (error) {
-    console.error('Error updating category:', error);
+    console.error('Error updating note:', error);
     return c.json({ error: 'Internal Server Error' }, 500);
   }
 });
 
-/**
- * Delete a category by slug.
- * Deletes the category with the specified slug and all its associated questions.
- */
-app.delete('/categories/:slug', async (c) => {
-  const slug = c.req.param('slug');
-
+app.delete('/notes/:id', authMiddleware, async (c) => {
+  const id = parseInt(c.req.param('id'));
   try {
-    const deletedCategory = await deleteCategory(slug);
-
-    if (!deletedCategory) {
-      return c.json({ success: false, message: 'Category not found' }, 404);
-    }
-
-    return c.json({ success: true }, 200); // Return success: true on successful deletion
+    const deletedNote = await deleteNote(id);
+    if (!deletedNote) return c.json({ message: 'Note not found' }, 404);
+    return c.json({ success: true }, 200);
   } catch (error) {
-    console.error('Error deleting category:', error);
+    console.error('Error deleting note:', error);
     return c.json({ success: false, error: 'Internal Server Error' }, 500);
   }
 });
 
 // ==================================================
-// Question Endpoints
+// User Endpoints
 // ==================================================
 
-/**
- * View all questions in a category with pagination.
- * Returns a JSON response with questions and pagination details.
- */
-app.get('/categories/:slug/questions', async (c) => {
-  const slug = c.req.param('slug');
-  const limit = parseInt(c.req.query('limit') || '10');
-  const page = parseInt(c.req.query('page') || '1');
+app.post('/users', async (c) => {
+  let userData;
+  try {
+    userData = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON' }, 400);
+  }
+
+  const validUser = validateUserCreation(userData);
+  if (!validUser.success) {
+    return c.json({ error: 'Invalid data', errors: validUser.error.flatten() }, 400);
+  }
 
   try {
-    const category = await getCategory(slug);
-
-    if (!category) {
-      return c.json({ message: 'Category not found' }, 404);
+    if (!(await isUsernameAvailable(validUser.data.username))) {
+      return c.json({ error: 'Username already taken' }, 400);
     }
+    if (!(await isEmailAvailable(validUser.data.email))) {
+      return c.json({ error: 'Email already registered' }, 400);
+    }
+    const createdUser = await createUser(validUser.data);
+    return c.json(createdUser, 201);
+  } catch (error) {
+    console.error('Error creating user:', error);
+    return c.json({ error: 'Internal Server Error' }, 500);
+  }
+});
 
-    const { questions, total, page: currentPage, limit: currentLimit } = await getQuestionsByCategory(category.id, limit, page);
+app.post('/auth/login', async (c) => {
+  let credentials;
+  try {
+    credentials = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON' }, 400);
+  }
 
+  try {
+    const user = await verifyCredentials(credentials.email, credentials.password);
+    if (!user) return c.json({ error: 'Invalid email or password' }, 401);
+    const token = signToken({ userId: user.id }, SECRET, 60 * 60); // 1 hour
     return c.json({
-      data: questions,
-      pagination: {
-        page: currentPage,
-        limit: currentLimit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
+      user: { id: user.id, username: user.username, email: user.email },
+      token
     });
   } catch (error) {
-    console.error('Error fetching questions by category:', error);
+    console.error('Error during login:', error);
     return c.json({ error: 'Internal Server Error' }, 500);
   }
 });
 
-/**
- * Create a new question in a category.
- * Accepts JSON data with `text` and `options` fields and creates a new question in the database.
- */
-app.post('/categories/:slug/questions', async (c) => {
-  const slug = c.req.param('slug');
-  let questionData: unknown;
-
-  try {
-    questionData = await c.req.json();
-  } catch (e) {
-    return c.json({ error: 'Invalid JSON' }, 400);
-  }
-
-  const validQuestion = validateQuestionToCreate(questionData);
-
-  if (!validQuestion.success) {
-    return c.json({ error: 'Invalid data', errors: validQuestion.error.flatten() }, 400);
-  }
-
-  try {
-    const category = await getCategory(slug);
-
-    if (!category) {
-      return c.json({ message: 'Category not found' }, 404);
-    }
-
-    const questionWithCategory = {
-      ...validQuestion.data,
-      categoryId: category.id,
-    };
-
-    const createdQuestion = await createQuestion(questionWithCategory);
-    return c.json(createdQuestion, 201);
-  } catch (error) {
-    console.error('Error creating question:', error);
-    return c.json({ error: 'Internal Server Error' }, 500);
-  }
-});
-
-/**
- * Update a question by ID.
- * Accepts JSON data with `text` and `options` fields and updates the question with the specified ID.
- */
-app.patch('/questions/:id', async (c) => {
-  const id = parseInt(c.req.param('id'));
-  let updateData: unknown;
-
-  try {
-    updateData = await c.req.json();
-  } catch (e) {
-    return c.json({ error: 'Invalid JSON' }, 400);
-  }
-
-  const validQuestion = validateQuestionToUpdate(updateData);
-
-  if (!validQuestion.success) {
-    return c.json({ error: 'Invalid data', errors: validQuestion.error.flatten() }, 400);
-  }
-
-  try {
-    const updatedQuestion = await updateQuestion(id, validQuestion.data);
-
-    if (!updatedQuestion) {
-      return c.json({ message: 'Question not found' }, 404);
-    }
-
-    return c.json(updatedQuestion);
-  } catch (error) {
-    console.error('Error updating question:', error);
-    return c.json({ error: 'Internal Server Error' }, 500);
-  }
-});
-
-/**
- * Delete a question by ID.
- * Deletes the question with the specified ID.
- */
-app.delete('/questions/:id', async (c) => {
-  const id = parseInt(c.req.param('id'));
-
-  try {
-    await deleteQuestion(id);
-    return c.json({ success: true }, 200); // Return a JSON object with `success: true`
-  } catch (error) {
-    console.error('Error deleting question:', error);
-    return c.json({ success: false, error: 'Internal Server Error' }, 500); // Return `success: false` on error
-  }
-});
-
-// Start the server
-serve({
-  fetch: app.fetch,
-  port: 10000,
-}, (info) => {
+serve({ fetch: app.fetch, port: 10000 }, (info) => {
   console.log(`Server is running on http://localhost:${info.port}`);
 });
