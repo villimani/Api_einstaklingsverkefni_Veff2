@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { signToken, verifyToken } from './auth/jwt.js';
-import { getNotepads, getNotepad, getPublicNotepads } from './Database/notepad.db.js';
+import { createNotepad, getNotepads, getNotepad, validateNotepadCreation, validateNotepadUpdate, updateNotepad, deleteNotepad, getPublicNotepads, userOwnsNotepad } from './Database/notepad.db.js';
 import { createNote, getNotesByNotepad, getNoteById, validateNoteCreation, validateNoteUpdate, updateNote, deleteNote } from './Database/notes.db.js';
 import { createUser, validateUserCreation, verifyCredentials, isUsernameAvailable, isEmailAvailable } from './Database/user.db.js';
 const app = new Hono();
@@ -39,6 +39,62 @@ app.get('/', (c) => {
 // ==================================================
 // Notepad Endpoints (Updated)
 // ==================================================
+// POST route for creating a new notepad
+app.post('/notepads', authMiddleware, async (c) => {
+    let notepadData;
+    try {
+        notepadData = await c.req.json(); // Parse the incoming JSON body
+    }
+    catch {
+        return c.json({ error: 'Invalid JSON' }, 400); // Handle invalid JSON
+    }
+    // Validate the incoming data using Zod
+    const validationResult = validateNotepadCreation(notepadData);
+    if (!validationResult.success) {
+        return c.json({ error: validationResult.error.errors }, 400); // Return validation errors if any
+    }
+    // Extract valid data
+    const { title, description, isPublic, ownerId } = validationResult.data;
+    try {
+        // Create the notepad and return the result
+        const newNotepad = await createNotepad({
+            title,
+            description,
+            isPublic: isPublic || false, // Default to false if not provided
+            ownerId,
+        });
+        return c.json(newNotepad, 201); // Return the created notepad with status code 201
+    }
+    catch (error) {
+        console.error('Error creating notepad:', error);
+        return c.json({ error: 'Internal Server Error' }, 500);
+    }
+});
+// DELETE route for deleting a notepad by ID
+app.delete('/notepads/:id', authMiddleware, async (c) => {
+    const notepadId = Number(c.req.param('id')); // Get the notepad ID from the URL parameters
+    if (isNaN(notepadId)) {
+        return c.json({ error: 'Invalid notepad ID' }, 400); // If the ID is invalid, return an error
+    }
+    const userId = Number(c.get('userId')); // Assuming user ID is attached to the request via authMiddleware
+    // Check if the user owns the notepad
+    const ownsNotepad = await userOwnsNotepad(notepadId, userId);
+    if (!ownsNotepad) {
+        return c.json({ error: 'You do not have permission to delete this notepad' }, 403); // Return an error if the user does not own the notepad
+    }
+    try {
+        // Delete the notepad and return the result
+        const deletedNotepad = await deleteNotepad(notepadId);
+        if (!deletedNotepad) {
+            return c.json({ error: 'Notepad not found' }, 404); // If the notepad doesn't exist, return a 404 error
+        }
+        return c.json({ message: 'Notepad deleted successfully' }, 200); // Return success message
+    }
+    catch (error) {
+        console.error('Error deleting notepad:', error);
+        return c.json({ error: 'Internal Server Error' }, 500); // Handle server errors
+    }
+});
 app.get('/user/notepads', authMiddleware, async (c) => {
     try {
         const userId = Number(c.get('userId'));
@@ -90,6 +146,37 @@ app.get('/notepads/:id', authMiddleware, async (c) => {
         return c.json({ error: 'Internal Server Error' }, 500);
     }
 });
+// PUT route for updating a notepad by ID
+app.put('/notepads/:id', authMiddleware, async (c) => {
+    const notepadId = Number(c.req.param('id')); // Get the notepad ID from the URL parameters
+    const updateData = await c.req.json(); // Get the updated notepad data from the request body
+    if (isNaN(notepadId)) {
+        return c.json({ error: 'Invalid notepad ID' }, 400); // If the ID is invalid, return an error
+    }
+    const userId = Number(c.get('userId')); // Assuming user ID is attached to the request via authMiddleware
+    // Check if the user owns the notepad
+    const ownsNotepad = await userOwnsNotepad(notepadId, userId);
+    if (!ownsNotepad) {
+        return c.json({ error: 'You do not have permission to update this notepad' }, 403); // Return an error if the user does not own the notepad
+    }
+    // Validate the update data using the Zod schema
+    const validationResult = validateNotepadUpdate(updateData);
+    if (!validationResult.success) {
+        return c.json({ error: validationResult.error.errors }, 400); // Return validation errors
+    }
+    try {
+        // Update the notepad and return the result
+        const updatedNotepad = await updateNotepad(notepadId, updateData);
+        if (!updatedNotepad) {
+            return c.json({ error: 'Notepad not found' }, 404); // If the notepad doesn't exist, return a 404 error
+        }
+        return c.json(updatedNotepad, 200); // Return the updated notepad
+    }
+    catch (error) {
+        console.error('Error updating notepad:', error);
+        return c.json({ error: 'Internal Server Error' }, 500); // Handle server errors
+    }
+});
 // ==================================================
 // Note Endpoints
 // ==================================================
@@ -121,7 +208,7 @@ app.get('/notes/:id', authMiddleware, async (c) => {
     }
 });
 app.post('/notepads/:notepadId/notes', authMiddleware, async (c) => {
-    const notepadId = parseInt(c.req.param('notepadId'));
+    const notepadId = Number(c.req.param('notepadId')); // Get notepadId from the URL
     let noteData;
     try {
         noteData = await c.req.json();
@@ -129,16 +216,42 @@ app.post('/notepads/:notepadId/notes', authMiddleware, async (c) => {
     catch {
         return c.json({ error: 'Invalid JSON' }, 400);
     }
-    const validNote = validateNoteCreation(noteData);
+    // Add the notepadId to the data
+    const validNote = validateNoteCreation({ ...noteData, notepadId });
     if (!validNote.success) {
         return c.json({ error: 'Invalid data', errors: validNote.error.flatten() }, 400);
     }
     try {
-        const createdNote = await createNote({ ...validNote.data, notepadId });
+        // Create the note with the validated data
+        const createdNote = await createNote(validNote.data);
         return c.json(createdNote, 201);
     }
     catch (error) {
         console.error('Error creating note:', error);
+        return c.json({ error: 'Internal Server Error' }, 500);
+    }
+});
+app.get('/notepads/:notepadId/notes', authMiddleware, async (c) => {
+    const notepadId = Number(c.req.param('notepadId')); // Extract notepadId from URL params
+    // Validate notepadId
+    if (isNaN(notepadId)) {
+        return c.json({ error: 'Invalid notepad ID' }, 400);
+    }
+    try {
+        // Set default pagination values
+        const limit = 10; // Default limit per page
+        const page = 1; // Default page number
+        // Get notes for the specific notepad with pagination
+        const { notes, total, page: pageNumber, limit: pageLimit } = await getNotesByNotepad(notepadId, limit, page);
+        // Calculate total pages based on total notes and limit
+        const totalPages = Math.ceil(total / pageLimit);
+        return c.json({
+            data: notes,
+            pagination: { page: pageNumber, limit: pageLimit, total, totalPages },
+        });
+    }
+    catch (error) {
+        console.error('Error fetching notes:', error);
         return c.json({ error: 'Internal Server Error' }, 500);
     }
 });
