@@ -189,15 +189,28 @@ app.get('/public/notepads', async (c) => {
   }
 });
 
-app.get('/notepads/:id', authMiddleware, async (c) => {
+app.get('/notepads/:id', async (c) => {  // Removed authMiddleware
   const id = parseInt(c.req.param('id'));
   try {
-    const userId = Number(c.get('userId'));
     const notepad = await getNotepad(id);
     if (!notepad) return c.json({ message: 'Notepad not found' }, 404);
-    if (!notepad.isPublic && notepad.ownerId !== userId) {
-      return c.json({ message: 'Unauthorized - Notepad is private' }, 403);
+    
+    // Only check ownership if notepad is private
+    if (!notepad.isPublic) {
+      const authHeader = c.req.header('Authorization');
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return c.json({ message: 'Unauthorized - Notepad is private' }, 403);
+      }
+      
+      const token = authHeader.split(' ')[1];
+      const payload = verifyToken(token, SECRET);
+      const userId = Number(payload.userId);
+      
+      if (notepad.ownerId !== userId) {
+        return c.json({ message: 'Unauthorized - Notepad is private' }, 403);
+      }
     }
+
     const { notes } = await getNotesByNotepad(notepad.id, 1000, 1);
     return c.json({ ...notepad, notes });
   } catch (error) {
@@ -248,12 +261,31 @@ app.put('/notepads/:id', authMiddleware, async (c) => {
 // Note Endpoints
 // ==================================================
 
-app.get('/notepads/:notepadId/notes', authMiddleware, async (c) => {
+app.get('/notepads/:notepadId/notes', async (c) => {  // Removed authMiddleware
   const notepadId = parseInt(c.req.param('notepadId'));
   const limit = parseInt(c.req.query('limit') || '10', 10);
   const page = parseInt(c.req.query('page') || '1', 10);
 
   try {
+    const notepad = await getNotepad(notepadId);
+    if (!notepad) return c.json({ message: 'Notepad not found' }, 404);
+    
+    // Only check ownership if notepad is private
+    if (!notepad.isPublic) {
+      const authHeader = c.req.header('Authorization');
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return c.json({ message: 'Unauthorized - Notepad is private' }, 403);
+      }
+      
+      const token = authHeader.split(' ')[1];
+      const payload = verifyToken(token, SECRET);
+      const userId = Number(payload.userId);
+      
+      if (notepad.ownerId !== userId) {
+        return c.json({ message: 'Unauthorized - Notepad is private' }, 403);
+      }
+    }
+
     const { notes, total } = await getNotesByNotepad(notepadId, limit, page);
     const totalPages = Math.ceil(total / limit);
     return c.json({ data: notes, pagination: { page, limit, total, totalPages } });
