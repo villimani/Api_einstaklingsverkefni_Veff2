@@ -47,7 +47,7 @@ const prisma = new PrismaClient();
 
 /**
  * Fetches all notepads with pagination.
- * @param {number} [limit=10] - The number of notepads to return per page.
+ * @param {number} [limit=12] - The number of notepads to return per page.
  * @param {number} [page=1] - The page number to fetch.
  * @param {number} [ownerId] - Optional owner ID to filter by
  * @returns {Promise<{ notepads: Array<Notepad>, total: number, page: number, limit: number }>}
@@ -90,7 +90,7 @@ export async function getNotepads(
 
 /**
  * Fetches public notepads with pagination.
- * @param {number} [limit=10] - The number of notepads to return per page.
+ * @param {number} [limit=12] - The number of notepads to return per page.
  * @param {number} [page=1] - The page number to fetch.
  * @returns {Promise<{ notepads: Array<Notepad>, total: number, page: number, limit: number }>}
  */

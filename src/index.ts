@@ -155,7 +155,7 @@ app.delete('/notepads/:id', authMiddleware, async (c) => {
 app.get('/user/notepads', authMiddleware, async (c) => {
   try {
     const userId = Number(c.get('userId'));
-    const limit = parseInt(c.req.query('limit') || '12', 12);
+    const limit = parseInt(c.req.query('limit') || '12', 10);
     const page = parseInt(c.req.query('page') || '1', 10);
 
     const { notepads, total } = await getNotepads(limit, page, userId);
