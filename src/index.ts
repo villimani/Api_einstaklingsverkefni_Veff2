@@ -250,7 +250,7 @@ app.put('/notepads/:id', authMiddleware, async (c) => {
 
 app.get('/notepads/:notepadId/notes', async (c) => {
   const notepadId = parseInt(c.req.param('notepadId'));
-  const limit = parseInt(c.req.query('limit') || '10', 10);
+  const limit = parseInt(c.req.query('limit') || '12', 10);
   const page = parseInt(c.req.query('page') || '1', 10);
 
   try {
@@ -309,34 +309,7 @@ app.post('/notepads/:notepadId/notes', authMiddleware, async (c) => {
   }
 });
 
-app.get('/notepads/:notepadId/notes', authMiddleware, async (c) => {
-  const notepadId = Number(c.req.param('notepadId')); // Extract notepadId from URL params
 
-  // Validate notepadId
-  if (isNaN(notepadId)) {
-    return c.json({ error: 'Invalid notepad ID' }, 400);
-  }
-
-  try {
-    // Set default pagination values
-    const limit = 12; // Default limit per page
-    const page = 1; // Default page number
-
-    // Get notes for the specific notepad with pagination
-    const { notes, total, page: pageNumber, limit: pageLimit } = await getNotesByNotepad(notepadId, limit, page);
-
-    // Calculate total pages based on total notes and limit
-    const totalPages = Math.ceil(total / pageLimit);
-
-    return c.json({
-      data: notes,
-      pagination: { page: pageNumber, limit: pageLimit, total, totalPages },
-    });
-  } catch (error) {
-    console.error('Error fetching notes:', error);
-    return c.json({ error: 'Internal Server Error' }, 500);
-  }
-});
 
 
 
