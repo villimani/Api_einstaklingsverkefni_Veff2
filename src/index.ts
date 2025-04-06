@@ -155,7 +155,7 @@ app.delete('/notepads/:id', authMiddleware, async (c) => {
 app.get('/user/notepads', authMiddleware, async (c) => {
   try {
     const userId = Number(c.get('userId'));
-    const limit = parseInt(c.req.query('limit') || '10', 10);
+    const limit = parseInt(c.req.query('limit') || '12', 12);
     const page = parseInt(c.req.query('page') || '1', 10);
 
     const { notepads, total } = await getNotepads(limit, page, userId);
@@ -173,7 +173,7 @@ app.get('/user/notepads', authMiddleware, async (c) => {
 
 app.get('/public/notepads', async (c) => {
   try {
-    const limit = parseInt(c.req.query('limit') || '10', 10);
+    const limit = parseInt(c.req.query('limit') || '12', 10);
     const page = parseInt(c.req.query('page') || '1', 10);
 
     const { notepads, total } = await getPublicNotepads(limit, page);
@@ -343,7 +343,7 @@ app.get('/notepads/:notepadId/notes', authMiddleware, async (c) => {
 
   try {
     // Set default pagination values
-    const limit = 10; // Default limit per page
+    const limit = 12; // Default limit per page
     const page = 1; // Default page number
 
     // Get notes for the specific notepad with pagination

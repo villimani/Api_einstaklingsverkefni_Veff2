@@ -53,7 +53,7 @@ const prisma = new PrismaClient();
  * @returns {Promise<{ notepads: Array<Notepad>, total: number, page: number, limit: number }>}
  */
 export async function getNotepads(
-  limit: number = 10,
+  limit: number = 12,
   page: number = 1,
   ownerId?: number
 ): Promise<{ notepads: Array<Notepad>; total: number; page: number; limit: number }> {
@@ -95,7 +95,7 @@ export async function getNotepads(
  * @returns {Promise<{ notepads: Array<Notepad>, total: number, page: number, limit: number }>}
  */
 export async function getPublicNotepads(
-  limit: number = 10,
+  limit: number = 12,
   page: number = 1
 ): Promise<{ notepads: Array<Notepad>; total: number; page: number; limit: number }> {
   try {

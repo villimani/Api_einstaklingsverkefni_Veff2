@@ -41,7 +41,7 @@ type NoteToUpdate = z.infer<typeof NoteToUpdateSchema>;
  */
 export async function getNotesByNotepad(
   notepadId: number,
-  limit: number = 10,
+  limit: number = 12,
   page: number = 1
 ): Promise<{ notes: Array<Note>; total: number; page: number; limit: number }> {
   try {
